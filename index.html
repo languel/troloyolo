@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡️</text></svg>">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>troloyolo</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <!-- Header -->
+      <header class="header">
+        <h1 class="title">trolo<span class="accent">yolo</span></h1>
+        <p class="subtitle">Real-time object detection & pose estimation in your browser</p>
+      </header>
+
+      <!-- Main Content: Video + Controls side by side -->
+      <div class="main-content">
+        <!-- Video Section -->
+        <div class="video-section">
+          <div class="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+            
+            <!-- Overlay UI -->
+            <div id="loader" class="loader-overlay">
+              <div class="spinner"></div>
+              <p id="loader-text">Initializing...</p>
+            </div>
+            
+            <!-- Status Badge -->
+            <div class="status-badge">
+              <span id="status-dot" class="status-dot"></span>
+              <span id="status-text">Ready</span>
+            </div>
+            
+            <!-- FPS Counter -->
+            <div class="fps-badge">
+              <span id="fps">0</span> FPS
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+        <!-- Model Select -->
+        <div class="control-group">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <option value="onnx-community/yolo26n-ONNX">Nano (Fastest)</option>
+            <option value="onnx-community/yolo26s-ONNX">Small</option>
+            <option value="onnx-community/yolo26m-ONNX">Medium</option>
+            <option value="onnx-community/yolo26l-ONNX">Large</option>
+            <option value="onnx-community/yolo26x-ONNX">X-Large (Accurate)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="backend-select">Backend</label>
+          <select id="backend-select">
+            <option value="auto">Auto</option>
+            <option value="webgpu">WebGPU</option>
+            <option value="wasm">WASM</option>
+          </select>
+        </div>
+
+        <!-- Toggles -->
+        <div class="toggle-group">
+          <label class="toggle">
+            <input type="checkbox" id="toggle-detect" checked />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Detection</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-pose" checked />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Pose</span>
+          </label>
+        </div>
+
+        <!-- Threshold -->
+        <div class="control-group threshold-control">
+          <label for="threshold">Confidence: <span id="threshold-value">50%</span></label>
+          <input type="range" id="threshold" min="0" max="100" value="50" />
+        </div>
+
+        <!-- Start Button -->
+        <button id="start-btn" class="btn-primary" disabled>
+          <span id="btn-icon">▶</span>
+          <span id="btn-text">Start Camera</span>
+        </button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <p>Powered by <a href="https://huggingface.co/docs/transformers.js" target="_blank">🤗 Transformers.js</a></p>
+      </footer>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
