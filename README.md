@@ -28,6 +28,14 @@ The browser still downloads Transformers.js from jsDelivr and the selected YOLO2
 
 Allow camera access when prompted.
 
+## Stream-friendly UI
+
+The app fills the whole browser window so it can be captured into other apps. Controls live in a translucent overlay on the right.
+
+- Press `Alt+U` to toggle clean mode.
+- Click or hover the right-edge chevron to bring the controls back.
+- Open `http://localhost:5173/?clean=1` to start with only the camera/tracking output visible.
+
 ## Remote testing over Tailscale
 
 Browsers only allow camera access from secure contexts. `http://localhost:5173` is allowed, but a remote URL like `http://machine-name:5173` or `http://100.x.y.z:5173` is not. The browser can deny camera access before showing a prompt.

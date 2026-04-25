@@ -4,6 +4,7 @@ import { AutoModel, AutoProcessor, RawImage } from 'https://cdn.jsdelivr.net/npm
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const videoContainer = document.getElementById('video-container');
 const startBtn = document.getElementById('start-btn');
 const btnIcon = document.getElementById('btn-icon');
 const btnText = document.getElementById('btn-text');
@@ -11,6 +12,8 @@ const modelSelect = document.getElementById('model-select');
 const backendSelect = document.getElementById('backend-select');
 const toggleDetect = document.getElementById('toggle-detect');
 const togglePose = document.getElementById('toggle-pose');
+const toggleCamera = document.getElementById('toggle-camera');
+const toggleMirror = document.getElementById('toggle-mirror');
 const thresholdInput = document.getElementById('threshold');
 const thresholdValueEl = document.getElementById('threshold-value');
 const fpsEl = document.getElementById('fps');
@@ -18,6 +21,7 @@ const loader = document.getElementById('loader');
 const loaderText = document.getElementById('loader-text');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
+const uiToggle = document.getElementById('ui-toggle');
 
 // State
 let detectModel = null;
@@ -29,8 +33,12 @@ let threshold = 0.5;
 let enableDetect = true;
 let enablePose = true;
 let backend = 'auto';
+let facingMode = 'environment';
+let mirrorVideo = false;
 let activeDevice = null;
 let animationId = null;
+let isUiCollapsed = false;
+const urlParams = new URLSearchParams(window.location.search);
 
 // Offscreen canvas for frame capture
 const offscreen = document.createElement('canvas');
@@ -64,6 +72,68 @@ const showLoader = (text) => {
 const hideLoader = () => loader.classList.remove('visible');
 
 const hasCameraSecurityContext = () => window.isSecureContext || ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+
+const getPixelRatio = () => Math.max(1, window.devicePixelRatio || 1);
+
+const resizeCanvas = () => {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.round(rect.width * getPixelRatio());
+  const height = Math.round(rect.height * getPixelRatio());
+
+  if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+};
+
+const prepareFrameCanvas = () => {
+  if (!video.videoWidth || !video.videoHeight) return false;
+
+  if (offscreen.width !== video.videoWidth || offscreen.height !== video.videoHeight) {
+    offscreen.width = video.videoWidth;
+    offscreen.height = video.videoHeight;
+  }
+
+  resizeCanvas();
+  return true;
+};
+
+const getVideoCoverTransform = () => {
+  const sourceWidth = offscreen.width || video.videoWidth || canvas.width;
+  const sourceHeight = offscreen.height || video.videoHeight || canvas.height;
+  const scale = Math.max(canvas.width / sourceWidth, canvas.height / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+
+  return {
+    scale,
+    offsetX: (canvas.width - width) / 2,
+    offsetY: (canvas.height - height) / 2
+  };
+};
+
+const mapPointToCanvas = (x, y, transform) => ({
+  x: (mirrorVideo ? offscreen.width - x : x) * transform.scale + transform.offsetX,
+  y: y * transform.scale + transform.offsetY
+});
+
+const mapBoxToCanvas = ([x, y, w, h], transform) => ({
+  x: (mirrorVideo ? offscreen.width - x - w : x) * transform.scale + transform.offsetX,
+  y: y * transform.scale + transform.offsetY,
+  w: w * transform.scale,
+  h: h * transform.scale
+});
+
+const setUiCollapsed = (collapsed) => {
+  isUiCollapsed = collapsed;
+  document.documentElement.classList.toggle('ui-collapsed', collapsed);
+  document.body.classList.toggle('ui-collapsed', collapsed);
+  document.body.classList.remove('ui-quiet');
+  uiToggle.setAttribute('aria-expanded', String(!collapsed));
+  uiToggle.setAttribute('aria-label', collapsed ? 'Show controls' : 'Hide controls');
+};
+
+setUiCollapsed(urlParams.has('clean') || urlParams.get('ui') === '0');
 
 const getDeviceCandidates = () => {
   if (backend === 'wasm') return ['wasm'];
@@ -185,19 +255,19 @@ async function startCamera() {
 
     showLoader('Accessing camera...');
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } },
+      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false
     });
 
     video.srcObject = stream;
     video.onloadedmetadata = () => {
-      canvas.width = offscreen.width = video.videoWidth;
-      canvas.height = offscreen.height = video.videoHeight;
+      prepareFrameCanvas();
 
       isRunning = true;
       btnIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
       btnText.textContent = 'Stop Camera';
       startBtn.classList.add('running');
+      document.body.classList.add('camera-running');
 
       hideLoader();
       setStatus('Running', 'running');
@@ -225,7 +295,8 @@ function stopCamera(keepProcessingFlag = false) {
   btnIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l15 8-15 8V4z"/></svg>';
   btnText.textContent = 'Start Camera';
   startBtn.classList.remove('running');
-  canvas.width = canvas.width; // Clear canvas
+  document.body.classList.remove('camera-running');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   const statusLabel = activeDevice ? `Ready (${DEVICE_CONFIG[activeDevice].label})` : 'Ready';
   setStatus(statusLabel, 'ready');
   fpsEl.textContent = '0';
@@ -247,7 +318,9 @@ function loop() {
 }
 
 async function detect() {
-  offscreenCtx.drawImage(video, 0, 0);
+  if (!prepareFrameCanvas()) return;
+
+  offscreenCtx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
   const image = RawImage.fromCanvas(offscreen);
   const inputs = await processor(image);
 
@@ -277,7 +350,7 @@ async function detect() {
         const [cx, cy, w, h] = [boxes[i * 4], boxes[i * 4 + 1], boxes[i * 4 + 2], boxes[i * 4 + 3]];
         detections.push({
           type: 'object',
-          box: [(cx - w / 2) * canvas.width, (cy - h / 2) * canvas.height, w * canvas.width, h * canvas.height],
+          box: [(cx - w / 2) * offscreen.width, (cy - h / 2) * offscreen.height, w * offscreen.width, h * offscreen.height],
           score: maxScore,
           classId: maxClass,
           label: id2label[maxClass] || `Class ${maxClass}`
@@ -295,12 +368,12 @@ async function detect() {
         const keypoints = [];
         for (let k = 0; k < 17; k++) {
           const kIdx = offset + 6 + k * 3;
-          keypoints.push({ x: data[kIdx] * canvas.width, y: data[kIdx + 1] * canvas.height, c: data[kIdx + 2] });
+          keypoints.push({ x: data[kIdx] * offscreen.width, y: data[kIdx + 1] * offscreen.height, c: data[kIdx + 2] });
         }
         detections.push({
           type: 'pose',
-          box: [data[offset] * canvas.width, data[offset + 1] * canvas.height,
-                (data[offset + 2] - data[offset]) * canvas.width, (data[offset + 3] - data[offset + 1]) * canvas.height],
+          box: [data[offset] * offscreen.width, data[offset + 1] * offscreen.height,
+                (data[offset + 2] - data[offset]) * offscreen.width, (data[offset + 3] - data[offset + 1]) * offscreen.height],
           score,
           keypoints
         });
@@ -313,46 +386,56 @@ async function detect() {
 
 // Drawing
 function draw(detections) {
+  resizeCanvas();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const transform = getVideoCoverTransform();
+  const pixelRatio = canvas.width / (canvas.getBoundingClientRect().width || canvas.width);
 
   for (const det of detections.filter(d => d.type === 'object')) {
-    const [x, y, w, h] = det.box;
+    const { x, y, w, h } = mapBoxToCanvas(det.box, transform);
     const color = COLORS[det.classId % COLORS.length];
     const label = `${det.label} ${Math.round(det.score * 100)}%`;
+    const lineWidth = 2 * pixelRatio;
+    const fontSize = 12 * pixelRatio;
+    const labelHeight = 18 * pixelRatio;
+    const labelPadding = 4 * pixelRatio;
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lineWidth;
     ctx.strokeRect(x, y, w, h);
 
-    ctx.font = 'bold 12px system-ui';
+    ctx.font = `bold ${fontSize}px system-ui`;
     const tw = ctx.measureText(label).width;
     ctx.fillStyle = color;
-    ctx.fillRect(x, y > 18 ? y - 18 : y, tw + 8, 18);
+    ctx.fillRect(x, y > labelHeight ? y - labelHeight : y, tw + labelPadding * 2, labelHeight);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, x + 4, y > 18 ? y - 5 : y + 13);
+    ctx.fillText(label, x + labelPadding, y > labelHeight ? y - 5 * pixelRatio : y + 13 * pixelRatio);
   }
 
   for (const det of detections.filter(d => d.type === 'pose')) {
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * pixelRatio;
     ctx.strokeStyle = '#22d3ee';
     for (const [i, j] of SKELETON) {
       const a = det.keypoints[i], b = det.keypoints[j];
       if (a?.c >= POSE_THRESHOLD && b?.c >= POSE_THRESHOLD) {
+        const start = mapPointToCanvas(a.x, a.y, transform);
+        const end = mapPointToCanvas(b.x, b.y, transform);
         ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
         ctx.stroke();
       }
     }
 
     for (const kp of det.keypoints) {
       if (kp.c < POSE_THRESHOLD) continue;
+      const point = mapPointToCanvas(kp.x, kp.y, transform);
       ctx.fillStyle = '#6366f1';
       ctx.beginPath();
-      ctx.arc(kp.x, kp.y, 5, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, 5 * pixelRatio, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * pixelRatio;
       ctx.stroke();
     }
   }
@@ -360,12 +443,38 @@ function draw(detections) {
 
 // Event Listeners
 startBtn.addEventListener('click', () => isRunning ? stopCamera() : startCamera());
+uiToggle.addEventListener('click', () => setUiCollapsed(!isUiCollapsed));
+videoContainer.addEventListener('click', () => {
+  if (isUiCollapsed) {
+    document.body.classList.add('ui-quiet');
+  } else {
+    setUiCollapsed(true);
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.altKey && (event.code === 'KeyU' || event.key.toLowerCase() === 'u')) {
+    event.preventDefault();
+    setUiCollapsed(!isUiCollapsed);
+  }
+});
+window.addEventListener('resize', resizeCanvas);
 thresholdInput.addEventListener('input', (e) => {
   threshold = e.target.value / 100;
   thresholdValueEl.textContent = `${e.target.value}%`;
 });
 toggleDetect.addEventListener('change', (e) => enableDetect = e.target.checked);
 togglePose.addEventListener('change', (e) => enablePose = e.target.checked);
+toggleCamera.addEventListener('change', async (e) => {
+  facingMode = e.target.checked ? 'user' : 'environment';
+  if (isRunning) {
+    stopCamera(true);
+    await startCamera();
+  }
+});
+toggleMirror.addEventListener('change', (e) => {
+  mirrorVideo = e.target.checked;
+  video.classList.toggle('mirrored', mirrorVideo);
+});
 modelSelect.addEventListener('change', (e) => loadModels(e.target.value));
 backendSelect.addEventListener('change', (e) => {
   backend = e.target.value;
