@@ -28,13 +28,13 @@ The browser downloads Transformers.js and onnxruntime-web from jsDelivr, then lo
 
 Use a WebGPU-capable browser for best performance, or choose the WASM backend when WebGPU is unavailable. Auto mode tries WebGPU first and falls back to WASM when the browser only exposes WASM.
 
-Allow camera access when prompted.
+Allow camera access when prompted, or choose `Movie / GIF file` to run the same model layers over a local video or animated GIF. `Direct media URL` works for MP4, WebM, and GIF URLs that the browser can load and read from canvas; remote servers may need permissive CORS headers. YouTube watch links are not supported directly by the static browser demo because YouTube frames are cross-origin and cannot be read for model input.
 
 ## Layers
 
-The controls expose the camera feed and model outputs as independent layers:
+The controls expose the selected visual source and model outputs as independent layers:
 
-- `Camera` hides or shows the live video feed without stopping the stream.
+- `Camera` hides or shows the camera, movie, or GIF source without stopping processing.
 - `Detection` draws object boxes from the selected YOLO26 detect model.
 - `Pose` draws skeleton/keypoint overlays from the matching YOLO26 pose model.
 - `Segmentation` loads the matching AXERA YOLO26 segmentation ONNX file and draws mask overlays.

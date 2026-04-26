@@ -61,6 +61,7 @@ input {
 }
 
 #video,
+#image-source,
 #canvas {
   position: absolute;
   inset: 0;
@@ -79,6 +80,22 @@ input {
 }
 
 #video.hidden-layer {
+  opacity: 0;
+}
+
+.media-source {
+  display: none;
+}
+
+.media-source.active {
+  display: block;
+}
+
+#image-source.mirrored {
+  transform: scaleX(-1);
+}
+
+#image-source.hidden-layer {
   opacity: 0;
 }
 
@@ -371,6 +388,51 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.16);
 }
 
+.source-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+.source-input {
+  width: 100%;
+  min-height: 42px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.source-input::file-selector-button {
+  margin-right: 0.65rem;
+  color: #042f2e;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.source-input:hover {
+  border-color: rgba(94, 234, 212, 0.75);
+}
+
+.source-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.16);
+}
+
+.source-hint {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
 .toggle-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -527,6 +589,25 @@ input[type="range"]::-moz-range-thumb {
 
 .btn-primary.running:hover:not(:disabled) {
   background: #f87171;
+}
+
+.btn-secondary {
+  min-height: 42px;
+  padding: 0 0.85rem;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.btn-secondary:hover {
+  color: var(--accent-hover);
+  border-color: rgba(94, 234, 212, 0.75);
+  background: rgba(94, 234, 212, 0.1);
 }
 
 #btn-icon {
