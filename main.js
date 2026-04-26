@@ -474,7 +474,7 @@ function loop() {
     detect()
       .then(() => fpsEl.textContent = Math.round(1000 / (performance.now() - startTime)))
       .finally(() => isProcessing = false);
-  } else {
+  } else if (!hasRunnableLayer()) {
     resizeCanvas();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
