@@ -24,9 +24,23 @@ npm run dev
 
 Then open http://localhost:5173.
 
-The browser still downloads Transformers.js from jsDelivr and the selected YOLO26 ONNX models from Hugging Face. Use a WebGPU-capable browser for best performance, or choose the WASM backend when WebGPU is unavailable. Auto mode tries WebGPU first and falls back to WASM when the browser only exposes WASM.
+The browser downloads Transformers.js and onnxruntime-web from jsDelivr, then loads the selected YOLO26 models from Hugging Face. Detection and pose use the `onnx-community/yolo26*-ONNX` Transformers.js exports. Segmentation uses AXERA's YOLO26 segmentation ONNX files through onnxruntime-web.
+
+Use a WebGPU-capable browser for best performance, or choose the WASM backend when WebGPU is unavailable. Auto mode tries WebGPU first and falls back to WASM when the browser only exposes WASM.
 
 Allow camera access when prompted.
+
+## Layers
+
+The controls expose the camera feed and model outputs as independent layers:
+
+- `Camera` hides or shows the live video feed without stopping the stream.
+- `Detection` draws object boxes from the selected YOLO26 detect model.
+- `Pose` draws skeleton/keypoint overlays from the matching YOLO26 pose model.
+- `Segmentation` loads the matching AXERA YOLO26 segmentation ONNX file and draws mask overlays.
+- `OBB` and `Classify` are present in the UI for future model sources. They automatically mark themselves unavailable when a browser-ready model is not found.
+
+Changing model size, backend, or model layers reloads only the required model layers. The overlay keeps the last completed inference frame while the next frame is processing, so slower layers should not flicker between inference passes.
 
 ## Stream-friendly UI
 
@@ -49,7 +63,7 @@ npm run dev
 In another terminal:
 
 ```bash
-tailscale serve 5173
+tailscale serve --bg --set-path /troloyolo 5173
 ```
 
 Tailscale prints a URL like:
@@ -65,28 +79,28 @@ On this macOS machine, the GUI app's CLI is the reliable one to use:
 ```bash
 /Applications/Tailscale.app/Contents/MacOS/Tailscale serve status
 /Applications/Tailscale.app/Contents/MacOS/Tailscale serve reset
-/Applications/Tailscale.app/Contents/MacOS/Tailscale serve --bg 5173
+/Applications/Tailscale.app/Contents/MacOS/Tailscale serve --bg --set-path /troloyolo 5173
 ```
 
 The expected config is:
 
 ```text
 https://office.solarflare-stonecat.ts.net (tailnet only)
-|-- / proxy http://127.0.0.1:5173
+|-- /troloyolo proxy http://127.0.0.1:5173
 ```
 
 Test it from the host:
 
 ```bash
-curl -I https://office.solarflare-stonecat.ts.net/
+curl -I https://office.solarflare-stonecat.ts.net/troloyolo/
 ```
 
-You should see `HTTP/2 200`. If you see `ERR_SSL_PROTOCOL_ERROR`, reset Serve and re-run the `serve --bg 5173` command above.
+You should see `HTTP/2 200`. If you see `ERR_SSL_PROTOCOL_ERROR`, reset Serve and re-run the `serve --bg --set-path /troloyolo 5173` command above.
 
 For a more reliable class/demo URL that also works from browsers that are not correctly routed through the tailnet, use Tailscale Funnel:
 
 ```bash
-/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg 5173
+/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg --set-path /troloyolo 5173
 ```
 
 Expected config:
@@ -96,7 +110,7 @@ Expected config:
 #     - https://office.solarflare-stonecat.ts.net
 
 https://office.solarflare-stonecat.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:5173
+|-- /troloyolo proxy http://127.0.0.1:5173
 ```
 
 Turn it off when the demo is done:

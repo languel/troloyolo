@@ -55,7 +55,7 @@
         <div class="ui-panel" id="ui-panel">
           <header class="header">
             <h1 class="title">trolo<span class="accent">yolo</span></h1>
-            <p class="subtitle">Real-time object detection & pose estimation</p>
+            <p class="subtitle">Real-time YOLO26 vision layers</p>
           </header>
 
           <div class="controls">
@@ -80,20 +80,47 @@
               </select>
             </div>
 
-            <!-- Toggles -->
+            <!-- Layers -->
+            <div class="control-group">
+              <label>Layers</label>
+              <div class="toggle-group">
+                <label class="toggle">
+                  <input type="checkbox" id="layer-camera" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">Camera</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="layer-detect" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">Detection</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="layer-segment" />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">Segmentation</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="layer-pose" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">Pose</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="layer-obb" />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">OBB</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="layer-classify" />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">Classify</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Camera Controls -->
             <div class="toggle-group">
               <label class="toggle">
-                <input type="checkbox" id="toggle-detect" checked />
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">Detection</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="toggle-pose" checked />
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">Pose</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="toggle-camera" />
+                <input type="checkbox" id="toggle-facing" />
                 <span class="toggle-slider"></span>
                 <span class="toggle-label">Front cam</span>
               </label>

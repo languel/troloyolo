@@ -78,6 +78,10 @@ input {
   transform: scaleX(-1);
 }
 
+#video.hidden-layer {
+  opacity: 0;
+}
+
 /* ============ Loader Overlay ============ */
 .loader-overlay {
   position: absolute;
@@ -384,6 +388,10 @@ select:focus {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.toggle.unavailable {
+  opacity: 0.58;
 }
 
 .toggle input {
