@@ -14,12 +14,12 @@ const btnIcon = document.getElementById('btn-icon');
 const btnText = document.getElementById('btn-text');
 const modelSelect = document.getElementById('model-select');
 const backendSelect = document.getElementById('backend-select');
+const sourceControl = document.getElementById('source-control');
 const sourceSelect = document.getElementById('source-select');
 const mediaFile = document.getElementById('media-file');
 const mediaUrl = document.getElementById('media-url');
 const mediaUrlRow = document.getElementById('media-url-row');
 const loadUrlBtn = document.getElementById('load-url-btn');
-const sourceHint = document.getElementById('source-hint');
 const layerCamera = document.getElementById('layer-camera');
 const layerDetect = document.getElementById('layer-detect');
 const layerSegment = document.getElementById('layer-segment');
@@ -42,7 +42,7 @@ const models = {};
 let processor = null;
 let isRunning = false;
 let isProcessing = false;
-let threshold = 0.5;
+let threshold = 0.65;
 let layers = {
   camera: true,
   detect: true,
@@ -55,6 +55,7 @@ let backend = 'auto';
 let sourceMode = 'camera';
 let activeSourceType = 'camera';
 let mediaObjectUrl = null;
+let lastFrameErrorMessage = '';
 let facingMode = 'environment';
 let mirrorVideo = false;
 let activeDevice = null;
@@ -87,7 +88,7 @@ const SKELETON = [
   [5, 11], [6, 12], [11, 12],
   [11, 13], [13, 15], [12, 14], [14, 16]
 ];
-const POSE_THRESHOLD = 0.0001;
+const POSE_THRESHOLD = 0.25;
 const YOLO_INPUT_SIZE = 640;
 const YOLO_MASK_ALPHA = 0.36;
 const AXERA_SEGMENT_REPO = 'https://huggingface.co/AXERA-TECH/yolo26-seg/resolve/main';
@@ -167,6 +168,15 @@ const revokeMediaObjectUrl = () => {
   mediaObjectUrl = null;
 };
 
+const setElementCrossOrigin = (element, url) => {
+  if (url.startsWith('blob:')) {
+    element.removeAttribute('crossorigin');
+    return;
+  }
+
+  element.crossOrigin = 'anonymous';
+};
+
 const setActiveMediaVisibility = () => {
   const imageActive = activeSourceType === 'image';
   video.classList.toggle('media-source', imageActive);
@@ -183,6 +193,14 @@ const getSourceLabel = () => ({
   video: 'Video',
   image: 'GIF'
 }[activeSourceType] || 'Source');
+
+const getFrameReadErrorMessage = (error) => {
+  if (error?.name === 'SecurityError') {
+    return 'This media source blocks canvas reads. Try a local file or a direct URL with CORS enabled.';
+  }
+
+  return error?.message || 'Could not process this media frame.';
+};
 
 const resizeCanvas = () => {
   const rect = canvas.getBoundingClientRect();
@@ -274,12 +292,30 @@ const getLabel = (model, classId) => model?.config?.id2label?.[classId] || model
 
 const sigmoid = (value) => 1 / (1 + Math.exp(-value));
 
-const maybeNormalizeBox = ([x1, y1, x2, y2]) => {
-  if (Math.max(x1, y1, x2, y2) <= 1.5) {
-    return [x1 * offscreen.width, y1 * offscreen.height, (x2 - x1) * offscreen.width, (y2 - y1) * offscreen.height];
-  }
-  return [x1, y1, x2 - x1, y2 - y1];
+const scaleModelCoordinate = (value, axisSize) => {
+  if (Math.abs(value) <= 1.5) return value * axisSize;
+  return value * axisSize / YOLO_INPUT_SIZE;
 };
+
+const scaleModelLength = (value, axisSize) => {
+  if (Math.abs(value) <= 1.5) return value * axisSize;
+  return value * axisSize / YOLO_INPUT_SIZE;
+};
+
+const scaleModelBox = ([x1, y1, x2, y2]) => {
+  const left = scaleModelCoordinate(x1, offscreen.width);
+  const top = scaleModelCoordinate(y1, offscreen.height);
+  const right = scaleModelCoordinate(x2, offscreen.width);
+  const bottom = scaleModelCoordinate(y2, offscreen.height);
+  return [left, top, right - left, bottom - top];
+};
+
+const scaleModelCenterBox = ([cx, cy, w, h]) => [
+  scaleModelCoordinate(cx - w / 2, offscreen.width),
+  scaleModelCoordinate(cy - h / 2, offscreen.height),
+  scaleModelLength(w, offscreen.width),
+  scaleModelLength(h, offscreen.height)
+];
 
 const iou = (a, b) => {
   const x1 = Math.max(a[0], b[0]);
@@ -468,6 +504,7 @@ const setRunningUi = (running) => {
 
 function startProcessingLoop() {
   prepareFrameCanvas();
+  lastFrameErrorMessage = '';
   setRunningUi(true);
   hideLoader();
   setStatus('Running', 'running');
@@ -554,6 +591,7 @@ async function startMediaUrl(url, type, label) {
     await new Promise((resolve, reject) => {
       imageSource.onload = resolve;
       imageSource.onerror = () => reject(new Error(`Could not load GIF source: ${label}`));
+      setElementCrossOrigin(imageSource, url);
       imageSource.src = url;
     });
     startProcessingLoop();
@@ -567,11 +605,7 @@ async function startMediaUrl(url, type, label) {
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
-    if (url.startsWith('blob:')) {
-      video.removeAttribute('crossorigin');
-    } else {
-      video.crossOrigin = 'anonymous';
-    }
+    setElementCrossOrigin(video, url);
     video.src = url;
     video.play().catch(reject);
   });
@@ -587,8 +621,10 @@ function stopMediaElements() {
 
   video.pause();
   video.removeAttribute('src');
+  video.removeAttribute('crossorigin');
   video.load();
   imageSource.removeAttribute('src');
+  imageSource.removeAttribute('crossorigin');
   revokeMediaObjectUrl();
 }
 
@@ -616,6 +652,17 @@ function loop() {
     const startTime = performance.now();
     detect()
       .then(() => fpsEl.textContent = Math.round(1000 / (performance.now() - startTime)))
+      .catch((error) => {
+        const message = getFrameReadErrorMessage(error);
+        console.error('Frame processing error:', error);
+        fpsEl.textContent = '0';
+
+        if (message !== lastFrameErrorMessage) {
+          lastFrameErrorMessage = message;
+          setStatus('Frame Error', 'error');
+          showLoader(message);
+        }
+      })
       .finally(() => isProcessing = false);
   } else if (!hasRunnableLayer()) {
     resizeCanvas();
@@ -686,10 +733,10 @@ function prepareYoloInput() {
 }
 
 function parseDetectionOutput(output, model) {
-  const detections = [];
+  const candidates = [];
   const scores = output.logits?.sigmoid?.().data;
   const boxes = output.pred_boxes?.data;
-  if (!scores || !boxes) return detections;
+  if (!scores || !boxes) return [];
 
   const numBoxes = Math.min(300, boxes.length / 4);
   const numClasses = scores.length / numBoxes;
@@ -702,9 +749,11 @@ function parseDetectionOutput(output, model) {
     }
     if (maxScore >= threshold) {
       const [cx, cy, w, h] = [boxes[i * 4], boxes[i * 4 + 1], boxes[i * 4 + 2], boxes[i * 4 + 3]];
-      detections.push({
+      const box = scaleModelCenterBox([cx, cy, w, h]);
+      candidates.push({
         type: 'object',
-        box: [(cx - w / 2) * offscreen.width, (cy - h / 2) * offscreen.height, w * offscreen.width, h * offscreen.height],
+        box,
+        xyxy: [box[0], box[1], box[0] + box[2], box[1] + box[3]],
         score: maxScore,
         classId: maxClass,
         label: getLabel(model, maxClass)
@@ -712,7 +761,7 @@ function parseDetectionOutput(output, model) {
     }
   }
 
-  return detections;
+  return nms(candidates, 0.45, 12);
 }
 
 function parsePoseOutput(output) {
@@ -731,12 +780,15 @@ function parsePoseOutput(output) {
       const keypoints = [];
       for (let k = 0; k < 17; k++) {
         const kIdx = offset + 6 + k * 3;
-        keypoints.push({ x: data[kIdx] * offscreen.width, y: data[kIdx + 1] * offscreen.height, c: data[kIdx + 2] });
+        keypoints.push({
+          x: scaleModelCoordinate(data[kIdx], offscreen.width),
+          y: scaleModelCoordinate(data[kIdx + 1], offscreen.height),
+          c: data[kIdx + 2]
+        });
       }
       detections.push({
         type: 'pose',
-        box: [data[offset] * offscreen.width, data[offset + 1] * offscreen.height,
-              (data[offset + 2] - data[offset]) * offscreen.width, (data[offset + 3] - data[offset + 1]) * offscreen.height],
+        box: scaleModelBox([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]),
         score,
         keypoints
       });
@@ -883,10 +935,10 @@ function parseObbOutput(output, model) {
     const classId = Math.max(0, Math.round(data[offset + 5]));
     detections.push({
       type: 'obb',
-      cx: data[offset] * offscreen.width,
-      cy: data[offset + 1] * offscreen.height,
-      w: data[offset + 2] * offscreen.width,
-      h: data[offset + 3] * offscreen.height,
+      cx: scaleModelCoordinate(data[offset], offscreen.width),
+      cy: scaleModelCoordinate(data[offset + 1], offscreen.height),
+      w: scaleModelLength(data[offset + 2], offscreen.width),
+      h: scaleModelLength(data[offset + 3], offscreen.height),
       angle: data[offset + 6],
       score,
       classId,
@@ -1102,7 +1154,7 @@ sourceSelect.addEventListener('change', (e) => {
   mediaFile.hidden = sourceMode !== 'file';
   mediaUrlRow.hidden = sourceMode !== 'url';
   toggleFacing.closest('.toggle').hidden = sourceMode !== 'camera';
-  sourceHint.textContent = sourceMode === 'url'
+  sourceControl.title = sourceMode === 'url'
     ? 'Use a direct MP4/WebM/GIF URL. YouTube pages cannot be read as canvas frames.'
     : 'Use a camera stream, local movie/GIF, or direct MP4/WebM/GIF URL.';
   setRunningUi(false);
