@@ -377,7 +377,7 @@ const resetTracks = () => {
 };
 
 const assignTrackIds = (detections) => {
-  const trackable = detections.filter(det => ['object', 'segment'].includes(det.type) && det.box && Number.isFinite(det.classId));
+  const trackable = detections.filter(det => ['object', 'segment', 'pose'].includes(det.type) && det.box && Number.isFinite(det.classId));
   const usedTrackIds = new Set();
 
   for (const det of trackable) {
@@ -444,6 +444,33 @@ const serializeOscDetections = (detections) => {
         ncy: (y + h / 2) / height
       };
     });
+  const poses = detections
+    .filter(det => det.type === 'pose' && det.trackId && det.box && Array.isArray(det.keypoints))
+    .map(det => {
+      const [x, y, w, h] = det.box;
+      return {
+        id: det.trackId,
+        score: det.score,
+        x,
+        y,
+        w,
+        h,
+        nx: x / width,
+        ny: y / height,
+        nw: w / width,
+        nh: h / height,
+        ncx: (x + w / 2) / width,
+        ncy: (y + h / 2) / height,
+        keypoints: det.keypoints.map((kp, index) => ({
+          index,
+          x: kp.x,
+          y: kp.y,
+          c: kp.c,
+          nx: kp.x / width,
+          ny: kp.y / height
+        }))
+      };
+    });
 
   return {
     frameId: ++oscFrameId,
@@ -451,7 +478,8 @@ const serializeOscDetections = (detections) => {
     source: getSourceLabel().toLowerCase(),
     width,
     height,
-    objects
+    objects,
+    poses
   };
 };
 
@@ -998,7 +1026,8 @@ function parsePoseOutput(output) {
   if (!tensor) return detections;
 
   const data = tensor.data;
-  const stride = 57;
+  const stride = tensor.dims?.at?.(-1) || 57;
+  const keypointOffset = stride >= 57 ? 6 : 5;
   const numBoxes = Math.floor(data.length / stride);
 
   for (let i = 0; i < numBoxes; i++) {
@@ -1007,17 +1036,20 @@ function parsePoseOutput(output) {
     if (score >= threshold) {
       const keypoints = [];
       for (let k = 0; k < 17; k++) {
-        const kIdx = offset + 6 + k * 3;
+        const kIdx = offset + keypointOffset + k * 3;
+        const keypointScore = data[kIdx + 2];
         keypoints.push({
           x: scaleModelCoordinate(data[kIdx], offscreen.width),
           y: scaleModelCoordinate(data[kIdx + 1], offscreen.height),
-          c: data[kIdx + 2]
+          c: keypointScore >= POSE_THRESHOLD ? keypointScore : score
         });
       }
       detections.push({
         type: 'pose',
         box: scaleModelBox([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]),
         score,
+        classId: 0,
+        label: 'person',
         keypoints
       });
     }

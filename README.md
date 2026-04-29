@@ -6,14 +6,16 @@ colorTo: green
 sdk: static
 pinned: false
 license: apache-2.0
-short_description: A YOLO26 browser demo for interactive art experiments
+short_description: A browser-based YOLO26 object tracking and OSC experiment
 ---
 
 # troloyolo
 
-## Local demo
+## Local Tracking Experiment
 
-troloyolo is a local static replica and remix point for the YOLO26 WebGPU Space:
+troloyolo is a browser-based object tracking experiment for interactive art, performance, and media-control workflows. It runs YOLO26 models over a live camera, movie, or GIF source, assigns stable IDs to detected objects, and can stream the tracked data out as OSC.
+
+The project started from the YOLO26 WebGPU Space, but the current focus is tracking behavior, visual overlays, and OSC integration rather than mirroring the original demo:
 https://huggingface.co/spaces/webml-community/YOLO26-WebGPU
 
 Run it from the project folder:
@@ -24,15 +26,15 @@ npm run dev
 
 Then open http://localhost:5173.
 
-The browser downloads Transformers.js and onnxruntime-web from jsDelivr, then loads the selected YOLO26 models from Hugging Face. Detection and pose use the `onnx-community/yolo26*-ONNX` Transformers.js exports. Segmentation uses AXERA's YOLO26 segmentation ONNX files through onnxruntime-web.
+The browser downloads Transformers.js and onnxruntime-web from jsDelivr, then loads the selected YOLO26 models from Hugging Face. Detection and pose use the `onnx-community/yolo26*-ONNX` Transformers.js exports. Segmentation uses AXERA's YOLO26 segmentation ONNX files through onnxruntime-web. A small local Node bridge serves the app and forwards tracked detections as UDP OSC.
 
 Use a WebGPU-capable browser for best performance, or choose the WASM backend when WebGPU is unavailable. Auto mode tries WebGPU first and falls back to WASM when the browser only exposes WASM.
 
-Allow camera access when prompted, or choose `Movie / GIF file` to run the same model layers over a local video or animated GIF. `Direct media URL` works for MP4, WebM, and GIF URLs that the browser can load and read from canvas; remote servers may need permissive CORS headers. YouTube watch links are not supported directly by the static browser demo because YouTube frames are cross-origin and cannot be read for model input.
+Allow camera access when prompted, or choose `Movie / GIF file` to run the same tracking pipeline over a local video or animated GIF. `Direct media URL` works for MP4, WebM, and GIF URLs that the browser can load and read from canvas; remote servers may need permissive CORS headers. YouTube watch links are not supported directly because YouTube frames are cross-origin and cannot be read for model input.
 
 ## OSC output
 
-`npm run dev` starts a static web server with a local OSC bridge. The browser posts each completed inference frame to the bridge, and the bridge sends UDP OSC to `127.0.0.1:8000` by default. The OSC panel in the app can start/stop output, change the destination host/port, send a test packet, and open the in-app spec overlay.
+`npm run dev` starts the local web server with an OSC bridge. The browser posts each completed inference frame to the bridge, and the bridge sends UDP OSC to `127.0.0.1:8000` by default. The OSC panel in the app can start/stop output, change the destination host/port, send a test packet, and open the in-app spec overlay.
 
 Change the OSC destination with environment variables:
 
@@ -56,8 +58,10 @@ OSC messages:
 
 | Address | Arguments |
 | --- | --- |
-| `/troloyolo/frame` | `frameId:int count:int width:int height:int timestamp:float source:string` |
+| `/troloyolo/frame` | `frameId:int objectCount:int poseCount:int width:int height:int timestamp:float source:string` |
 | `/troloyolo/object` | `frameId:int id:int classId:int label:string type:string score:float nx:float ny:float nw:float nh:float ncx:float ncy:float x:float y:float w:float h:float` |
+| `/troloyolo/pose` | `frameId:int id:int score:float nx:float ny:float nw:float nh:float ncx:float ncy:float x:float y:float w:float h:float` |
+| `/troloyolo/pose/keypoint` | `frameId:int id:int index:int confidence:float nx:float ny:float x:float y:float` |
 | `/troloyolo/test` | `timestamp:float host:string port:int` |
 
 Object field meanings:
@@ -72,6 +76,16 @@ Object field meanings:
 | `nx`, `ny`, `nw`, `nh` | Normalized top-left box and size in source coordinates. |
 | `ncx`, `ncy` | Normalized box center in source coordinates. |
 | `x`, `y`, `w`, `h` | Pixel top-left box and size in the camera/movie/GIF source coordinate space. |
+
+Pose field meanings:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Stable tracked pose ID shown by the same tracker as object IDs. |
+| `index` | COCO keypoint index from `0..16`: nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles. |
+| `confidence` | Keypoint confidence used by the overlay. YOLO26 pose exports report very small keypoint confidence values, so the app falls back to the parent pose confidence when the keypoint value is below the draw threshold. |
+| `nx`, `ny` | Normalized keypoint position in source coordinates. |
+| `x`, `y` | Pixel keypoint position in source coordinates. |
 
 The normalized coordinates are `0..1`; the final `x y w h` values are source pixels. Use `npm run static` for the old no-bridge static server.
 
@@ -142,7 +156,7 @@ curl -I https://office.solarflare-stonecat.ts.net/troloyolo/
 
 You should see `HTTP/2 200`. If you see `ERR_SSL_PROTOCOL_ERROR`, reset Serve and re-run the `serve --bg --set-path /troloyolo 5173` command above.
 
-For a more reliable class/demo URL that also works from browsers that are not correctly routed through the tailnet, use Tailscale Funnel:
+For a more reliable class or test URL that also works from browsers that are not correctly routed through the tailnet, use Tailscale Funnel:
 
 ```bash
 /Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg --set-path /troloyolo 5173
@@ -158,7 +172,7 @@ https://office.solarflare-stonecat.ts.net (Funnel on)
 |-- /troloyolo proxy http://127.0.0.1:5173
 ```
 
-Turn it off when the demo is done:
+Turn it off when the tracking session is done:
 
 ```bash
 /Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --https=443 off

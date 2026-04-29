@@ -73,11 +73,13 @@ const sendOsc = (address, args) => {
 
 const sendOscFrame = (payload) => {
   const objects = Array.isArray(payload.objects) ? payload.objects : [];
+  const poses = Array.isArray(payload.poses) ? payload.poses : [];
   const frameId = Math.trunc(Number(payload.frameId) || 0);
 
   sendOsc('/troloyolo/frame', [
     frameId,
     objects.length,
+    poses.length,
     Math.trunc(Number(payload.width) || 0),
     Math.trunc(Number(payload.height) || 0),
     Number(payload.timestamp) || 0,
@@ -103,6 +105,38 @@ const sendOscFrame = (payload) => {
       Number(object.w) || 0,
       Number(object.h) || 0
     ]);
+  }
+
+  for (const pose of poses) {
+    sendOsc('/troloyolo/pose', [
+      frameId,
+      Math.trunc(Number(pose.id) || 0),
+      Number(pose.score) || 0,
+      Number(pose.nx) || 0,
+      Number(pose.ny) || 0,
+      Number(pose.nw) || 0,
+      Number(pose.nh) || 0,
+      Number(pose.ncx) || 0,
+      Number(pose.ncy) || 0,
+      Number(pose.x) || 0,
+      Number(pose.y) || 0,
+      Number(pose.w) || 0,
+      Number(pose.h) || 0
+    ]);
+
+    const keypoints = Array.isArray(pose.keypoints) ? pose.keypoints : [];
+    for (const keypoint of keypoints) {
+      sendOsc('/troloyolo/pose/keypoint', [
+        frameId,
+        Math.trunc(Number(pose.id) || 0),
+        Math.trunc(Number(keypoint.index) || 0),
+        Number(keypoint.c) || 0,
+        Number(keypoint.nx) || 0,
+        Number(keypoint.ny) || 0,
+        Number(keypoint.x) || 0,
+        Number(keypoint.y) || 0
+      ]);
+    }
   }
 };
 

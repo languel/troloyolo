@@ -206,9 +206,13 @@
             <p>The browser sends tracked detections to the local bridge. The bridge sends UDP OSC to the host and port in the OSC panel.</p>
             <dl class="spec-list">
               <dt>/troloyolo/frame</dt>
-              <dd>frameId, count, width, height, timestamp, source</dd>
+              <dd>frameId, objectCount, poseCount, width, height, timestamp, source</dd>
               <dt>/troloyolo/object</dt>
               <dd>frameId, id, classId, label, type, score, nx, ny, nw, nh, ncx, ncy, x, y, w, h</dd>
+              <dt>/troloyolo/pose</dt>
+              <dd>frameId, id, score, nx, ny, nw, nh, ncx, ncy, x, y, w, h</dd>
+              <dt>/troloyolo/pose/keypoint</dt>
+              <dd>frameId, id, index, confidence, nx, ny, x, y</dd>
               <dt>/troloyolo/test</dt>
               <dd>timestamp, host, port</dd>
             </dl>
