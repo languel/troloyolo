@@ -361,6 +361,13 @@ body.camera-running .status-badge {
   color: var(--text-secondary);
 }
 
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 select {
   width: 100%;
   min-height: 42px;
@@ -404,6 +411,10 @@ select:focus {
   border-radius: var(--radius);
   font-size: 0.88rem;
   transition: border-color 0.2s, background-color 0.2s;
+}
+
+.source-input[type="number"] {
+  padding-right: 0.45rem;
 }
 
 .source-input::file-selector-button {
@@ -602,6 +613,154 @@ input[type="range"]::-moz-range-thumb {
   color: var(--accent-hover);
   border-color: rgba(94, 234, 212, 0.75);
   background: rgba(94, 234, 212, 0.1);
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+  color: var(--accent-hover);
+  border-color: rgba(94, 234, 212, 0.75);
+  background: rgba(94, 234, 212, 0.1);
+  outline: none;
+}
+
+.osc-panel {
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.osc-toggle {
+  min-height: 40px;
+}
+
+.osc-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(86px, 0.65fr);
+  gap: 0.5rem;
+}
+
+.osc-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.osc-fields span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.osc-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.osc-status {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.osc-status.ok {
+  color: var(--accent-hover);
+}
+
+.osc-status.off {
+  color: var(--warning);
+}
+
+.osc-status.error {
+  color: #fca5a5;
+}
+
+.info-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(10px);
+}
+
+.info-overlay[hidden] {
+  display: none;
+}
+
+.info-dialog {
+  width: min(560px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  color: var(--text-primary);
+  background: rgba(18, 18, 24, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.info-header h2 {
+  font-size: 1rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.spec-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.spec-list dt {
+  color: var(--accent-hover);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.spec-list dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 #btn-icon {

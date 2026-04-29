@@ -36,6 +36,16 @@ const loaderText = document.getElementById('loader-text');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const uiToggle = document.getElementById('ui-toggle');
+const oscEnabledInput = document.getElementById('osc-enabled');
+const oscToggleLabel = document.getElementById('osc-toggle-label');
+const oscHostInput = document.getElementById('osc-host');
+const oscPortInput = document.getElementById('osc-port');
+const oscApplyBtn = document.getElementById('osc-apply-btn');
+const oscTestBtn = document.getElementById('osc-test-btn');
+const oscStatusEl = document.getElementById('osc-status');
+const oscInfoBtn = document.getElementById('osc-info-btn');
+const oscInfoOverlay = document.getElementById('osc-info-overlay');
+const oscInfoClose = document.getElementById('osc-info-close');
 
 // State
 const models = {};
@@ -61,6 +71,12 @@ let mirrorVideo = false;
 let activeDevice = null;
 let animationId = null;
 let isUiCollapsed = false;
+let nextTrackId = 1;
+let oscFrameId = 0;
+let oscInFlight = false;
+let lastOscFailureTime = 0;
+let oscEnabled = true;
+const tracks = new Map();
 const urlParams = new URLSearchParams(window.location.search);
 
 // Offscreen canvas for frame capture
@@ -91,6 +107,11 @@ const SKELETON = [
 const POSE_THRESHOLD = 0.25;
 const YOLO_INPUT_SIZE = 640;
 const YOLO_MASK_ALPHA = 0.36;
+const TRACK_IOU_THRESHOLD = 0.24;
+const TRACK_MAX_MISSES = 8;
+const OSC_ENDPOINT = './osc';
+const OSC_CONFIG_ENDPOINT = './osc/config';
+const OSC_TEST_ENDPOINT = './osc/test';
 const AXERA_SEGMENT_REPO = 'https://huggingface.co/AXERA-TECH/yolo26-seg/resolve/main';
 const DEVICE_CONFIG = {
   webgpu: { dtypes: ['fp16', 'fp32'], label: 'WebGPU' },
@@ -342,6 +363,209 @@ const nms = (detections, iouThreshold = 0.7, maxDetections = 30) => {
   return keep;
 };
 
+const getDetectionXyxy = (det) => det.xyxy || [
+  det.box[0],
+  det.box[1],
+  det.box[0] + det.box[2],
+  det.box[1] + det.box[3]
+];
+
+const resetTracks = () => {
+  tracks.clear();
+  nextTrackId = 1;
+  oscFrameId = 0;
+};
+
+const assignTrackIds = (detections) => {
+  const trackable = detections.filter(det => ['object', 'segment'].includes(det.type) && det.box && Number.isFinite(det.classId));
+  const usedTrackIds = new Set();
+
+  for (const det of trackable) {
+    const xyxy = getDetectionXyxy(det);
+    let bestTrack = null;
+    let bestScore = TRACK_IOU_THRESHOLD;
+
+    for (const track of tracks.values()) {
+      if (usedTrackIds.has(track.id) || track.classId !== det.classId || track.type !== det.type) continue;
+
+      const score = iou(xyxy, track.xyxy);
+      if (score > bestScore) {
+        bestScore = score;
+        bestTrack = track;
+      }
+    }
+
+    const track = bestTrack || {
+      id: nextTrackId++,
+      type: det.type,
+      classId: det.classId
+    };
+
+    track.xyxy = xyxy;
+    track.misses = 0;
+    tracks.set(track.id, track);
+    usedTrackIds.add(track.id);
+    det.trackId = track.id;
+  }
+
+  for (const [id, track] of tracks) {
+    if (usedTrackIds.has(id)) continue;
+    track.misses = (track.misses || 0) + 1;
+    if (track.misses > TRACK_MAX_MISSES) tracks.delete(id);
+  }
+
+  return detections;
+};
+
+const serializeOscDetections = (detections) => {
+  const width = offscreen.width || 1;
+  const height = offscreen.height || 1;
+  const objects = detections
+    .filter(det => ['object', 'segment'].includes(det.type) && det.trackId && det.box)
+    .map(det => {
+      const [x, y, w, h] = det.box;
+      return {
+        id: det.trackId,
+        type: det.type,
+        label: det.label,
+        classId: det.classId,
+        score: det.score,
+        x,
+        y,
+        w,
+        h,
+        cx: x + w / 2,
+        cy: y + h / 2,
+        nx: x / width,
+        ny: y / height,
+        nw: w / width,
+        nh: h / height,
+        ncx: (x + w / 2) / width,
+        ncy: (y + h / 2) / height
+      };
+    });
+
+  return {
+    frameId: ++oscFrameId,
+    timestamp: performance.now(),
+    source: getSourceLabel().toLowerCase(),
+    width,
+    height,
+    objects
+  };
+};
+
+const setOscStatus = (message, state = '') => {
+  oscStatusEl.textContent = message;
+  oscStatusEl.className = `osc-status ${state}`.trim();
+};
+
+const renderOscConfig = (config) => {
+  oscEnabled = Boolean(config.enabled);
+  oscEnabledInput.checked = oscEnabled;
+  oscToggleLabel.textContent = oscEnabled ? 'OSC on' : 'OSC off';
+  oscHostInput.value = config.host || '127.0.0.1';
+  oscPortInput.value = String(config.port || 8000);
+  setOscStatus(
+    oscEnabled
+      ? `sending to ${oscHostInput.value}:${oscPortInput.value}`
+      : `paused at ${oscHostInput.value}:${oscPortInput.value}`,
+    oscEnabled ? 'ok' : 'off'
+  );
+};
+
+const fetchOscConfig = async () => {
+  try {
+    const response = await fetch(OSC_CONFIG_ENDPOINT);
+    if (!response.ok) throw new Error(`OSC bridge returned ${response.status}`);
+    renderOscConfig(await response.json());
+  } catch {
+    oscEnabled = false;
+    oscEnabledInput.checked = false;
+    oscToggleLabel.textContent = 'OSC off';
+    setOscStatus('OSC bridge unavailable', 'error');
+  }
+};
+
+const applyOscConfig = async (patch = {}) => {
+  const port = Number(oscPortInput.value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    setOscStatus('port must be 1-65535', 'error');
+    throw new Error('port must be 1-65535');
+  }
+
+  oscApplyBtn.disabled = true;
+  setOscStatus('updating OSC...', '');
+
+  try {
+    const response = await fetch(OSC_CONFIG_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: oscEnabledInput.checked,
+        host: oscHostInput.value.trim(),
+        port,
+        ...patch
+      })
+    });
+
+    const config = await response.json();
+    if (!response.ok) throw new Error(config.error || `OSC bridge returned ${response.status}`);
+    lastOscFailureTime = 0;
+    renderOscConfig(config);
+    return config;
+  } catch (error) {
+    setOscStatus(error.message || 'OSC update failed', 'error');
+    throw error;
+  } finally {
+    oscApplyBtn.disabled = false;
+  }
+};
+
+const sendOscTest = async () => {
+  oscTestBtn.disabled = true;
+
+  try {
+    await applyOscConfig();
+    const response = await fetch(OSC_TEST_ENDPOINT, { method: 'POST' });
+    const config = await response.json();
+    if (!response.ok) throw new Error(config.error || `OSC bridge returned ${response.status}`);
+    renderOscConfig(config);
+    setOscStatus(`test sent to ${config.host}:${config.port}`, config.enabled ? 'ok' : 'off');
+  } catch (error) {
+    setOscStatus(error.message || 'OSC test failed', 'error');
+  } finally {
+    oscTestBtn.disabled = false;
+  }
+};
+
+const sendOscDetections = (detections) => {
+  if (!oscEnabled || oscInFlight || performance.now() - lastOscFailureTime < 2000) return;
+
+  const payload = serializeOscDetections(detections);
+  oscInFlight = true;
+
+  fetch(OSC_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    keepalive: true
+  })
+    .then(response => {
+      if (response.status === 404 || response.status === 405) {
+        lastOscFailureTime = performance.now();
+        setOscStatus('OSC bridge unavailable', 'error');
+      }
+    })
+    .catch(() => {
+      lastOscFailureTime = performance.now();
+      setOscStatus('OSC bridge unavailable', 'error');
+    })
+    .finally(() => {
+      oscInFlight = false;
+    });
+};
+
 const hexToRgba = (hex, alpha) => {
   const value = hex.replace('#', '');
   const r = parseInt(value.slice(0, 2), 16);
@@ -446,6 +670,7 @@ async function loadModels(modelId) {
     if (isRunning) stopCamera(true);
     while (isProcessing) await new Promise(r => setTimeout(r, 50));
 
+    resetTracks();
     await disposeModels();
     activeDevice = null;
     startBtn.disabled = true;
@@ -505,6 +730,7 @@ const setRunningUi = (running) => {
 function startProcessingLoop() {
   prepareFrameCanvas();
   lastFrameErrorMessage = '';
+  resetTracks();
   setRunningUi(true);
   hideLoader();
   setStatus('Running', 'running');
@@ -703,6 +929,8 @@ async function detect() {
     detections.push(...MODEL_LAYERS[key].parse(output, models[key], input));
   }
 
+  assignTrackIds(detections);
+  sendOscDetections(detections);
   if (isRunning) draw(detections);
 }
 
@@ -983,7 +1211,7 @@ function draw(detections) {
   for (const det of detections.filter(d => d.type === 'segment')) {
     const { x, y, w, h } = mapBoxToCanvas(det.box, transform);
     const color = COLORS[det.classId % COLORS.length];
-    const label = `${det.label} ${Math.round(det.score * 100)}%`;
+    const label = `${det.trackId ? `#${det.trackId} ` : ''}${det.label} ${Math.round(det.score * 100)}%`;
     const lineWidth = 2 * pixelRatio;
     const fontSize = 12 * pixelRatio;
     const labelHeight = 18 * pixelRatio;
@@ -1012,7 +1240,7 @@ function draw(detections) {
   for (const det of detections.filter(d => d.type === 'object')) {
     const { x, y, w, h } = mapBoxToCanvas(det.box, transform);
     const color = COLORS[det.classId % COLORS.length];
-    const label = `${det.label} ${Math.round(det.score * 100)}%`;
+    const label = `${det.trackId ? `#${det.trackId} ` : ''}${det.label} ${Math.round(det.score * 100)}%`;
     const lineWidth = 2 * pixelRatio;
     const fontSize = 12 * pixelRatio;
     const labelHeight = 18 * pixelRatio;
@@ -1133,12 +1361,38 @@ videoContainer.addEventListener('click', () => {
   }
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !oscInfoOverlay.hidden) {
+    oscInfoOverlay.hidden = true;
+    oscInfoBtn.focus();
+    return;
+  }
+
   if (event.altKey && (event.code === 'KeyU' || event.key.toLowerCase() === 'u')) {
     event.preventDefault();
     setUiCollapsed(!isUiCollapsed);
   }
 });
 window.addEventListener('resize', resizeCanvas);
+oscEnabledInput.addEventListener('change', () => {
+  oscToggleLabel.textContent = oscEnabledInput.checked ? 'OSC on' : 'OSC off';
+  applyOscConfig({ enabled: oscEnabledInput.checked }).catch(() => {});
+});
+oscApplyBtn.addEventListener('click', () => applyOscConfig().catch(() => {}));
+oscTestBtn.addEventListener('click', sendOscTest);
+oscInfoBtn.addEventListener('click', () => {
+  oscInfoOverlay.hidden = false;
+  oscInfoClose.focus();
+});
+oscInfoClose.addEventListener('click', () => {
+  oscInfoOverlay.hidden = true;
+  oscInfoBtn.focus();
+});
+oscInfoOverlay.addEventListener('click', (event) => {
+  if (event.target === oscInfoOverlay) {
+    oscInfoOverlay.hidden = true;
+    oscInfoBtn.focus();
+  }
+});
 thresholdInput.addEventListener('input', (e) => {
   threshold = e.target.value / 100;
   thresholdValueEl.textContent = `${e.target.value}%`;
@@ -1210,4 +1464,5 @@ backendSelect.addEventListener('change', (e) => {
 
 // Initialize
 setActiveMediaVisibility();
+fetchOscConfig();
 loadModels(modelSelect.value);

@@ -30,17 +30,62 @@ Use a WebGPU-capable browser for best performance, or choose the WASM backend wh
 
 Allow camera access when prompted, or choose `Movie / GIF file` to run the same model layers over a local video or animated GIF. `Direct media URL` works for MP4, WebM, and GIF URLs that the browser can load and read from canvas; remote servers may need permissive CORS headers. YouTube watch links are not supported directly by the static browser demo because YouTube frames are cross-origin and cannot be read for model input.
 
+## OSC output
+
+`npm run dev` starts a static web server with a local OSC bridge. The browser posts each completed inference frame to the bridge, and the bridge sends UDP OSC to `127.0.0.1:8000` by default. The OSC panel in the app can start/stop output, change the destination host/port, send a test packet, and open the in-app spec overlay.
+
+Change the OSC destination with environment variables:
+
+```bash
+OSC_HOST=127.0.0.1 OSC_PORT=9000 npm run dev
+```
+
+Initial bridge output can be disabled with:
+
+```bash
+OSC_ENABLED=0 npm run dev
+```
+
+Runtime bridge API:
+
+- `GET /osc/config` returns `{ enabled, host, port, packetsSent }`.
+- `POST /osc/config` accepts `{ enabled, host, port }` and returns the updated config.
+- `POST /osc/test` sends `/troloyolo/test` to the current destination.
+
+OSC messages:
+
+| Address | Arguments |
+| --- | --- |
+| `/troloyolo/frame` | `frameId:int count:int width:int height:int timestamp:float source:string` |
+| `/troloyolo/object` | `frameId:int id:int classId:int label:string type:string score:float nx:float ny:float nw:float nh:float ncx:float ncy:float x:float y:float w:float h:float` |
+| `/troloyolo/test` | `timestamp:float host:string port:int` |
+
+Object field meanings:
+
+| Field | Meaning |
+| --- | --- |
+| `frameId` | Incrementing inference frame counter, reset when the source or model stack restarts. |
+| `id` | Stable tracked object ID shown in the overlay as `#ID`. |
+| `classId`, `label` | COCO class index and resolved label. |
+| `type` | Detection source, currently `object` or `segment`. |
+| `score` | Model confidence from `0..1`. |
+| `nx`, `ny`, `nw`, `nh` | Normalized top-left box and size in source coordinates. |
+| `ncx`, `ncy` | Normalized box center in source coordinates. |
+| `x`, `y`, `w`, `h` | Pixel top-left box and size in the camera/movie/GIF source coordinate space. |
+
+The normalized coordinates are `0..1`; the final `x y w h` values are source pixels. Use `npm run static` for the old no-bridge static server.
+
 ## Layers
 
 The controls expose the selected visual source and model outputs as independent layers:
 
 - `Camera` hides or shows the camera, movie, or GIF source without stopping processing.
-- `Detection` draws object boxes from the selected YOLO26 detect model.
+- `Detection` draws object boxes from the selected YOLO26 detect model and tags each tracked object with a stable `#ID`.
 - `Pose` draws skeleton/keypoint overlays from the matching YOLO26 pose model.
 - `Segmentation` loads the matching AXERA YOLO26 segmentation ONNX file and draws mask overlays.
 - `OBB` and `Classify` are present in the UI for future model sources. They automatically mark themselves unavailable when a browser-ready model is not found.
 
-Changing model size, backend, or model layers reloads only the required model layers. The overlay keeps the last completed inference frame while the next frame is processing, so slower layers should not flicker between inference passes.
+Changing model size, backend, or model layers reloads only the required model layers. The overlay keeps the last completed inference frame while the next frame is processing, so slower layers should not flicker between inference passes. Track IDs reset when the source or model stack restarts.
 
 ## Stream-friendly UI
 

@@ -152,6 +152,35 @@
               <input type="range" id="threshold" min="0" max="100" value="65" />
             </div>
 
+            <section class="control-group osc-panel" aria-label="OSC setup">
+              <div class="section-heading">
+                <label for="osc-enabled">OSC</label>
+                <button id="osc-info-btn" class="icon-btn" type="button" aria-haspopup="dialog" aria-controls="osc-info-overlay" title="OSC info">
+                  <span aria-hidden="true">i</span>
+                </button>
+              </div>
+              <label class="toggle osc-toggle">
+                <input type="checkbox" id="osc-enabled" checked />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label" id="osc-toggle-label">OSC on</span>
+              </label>
+              <div class="osc-fields">
+                <label>
+                  <span>Host</span>
+                  <input id="osc-host" class="source-input" type="text" value="127.0.0.1" autocomplete="off" spellcheck="false" />
+                </label>
+                <label>
+                  <span>Port</span>
+                  <input id="osc-port" class="source-input" type="number" min="1" max="65535" value="8000" inputmode="numeric" />
+                </label>
+              </div>
+              <div class="osc-actions">
+                <button id="osc-apply-btn" class="btn-secondary" type="button">Apply</button>
+                <button id="osc-test-btn" class="btn-secondary" type="button">Test</button>
+              </div>
+              <p id="osc-status" class="osc-status">OSC bridge not checked</p>
+            </section>
+
             <!-- Start Button -->
             <button id="start-btn" class="btn-primary" disabled>
               <span id="btn-icon">▶</span>
@@ -164,8 +193,31 @@
           </div>
         </div>
       </aside>
+
+      <div id="osc-info-overlay" class="info-overlay" hidden>
+        <div class="info-dialog" role="dialog" aria-modal="true" aria-labelledby="osc-info-title">
+          <div class="info-header">
+            <h2 id="osc-info-title">OSC setup</h2>
+            <button id="osc-info-close" class="icon-btn" type="button" aria-label="Close OSC info" title="Close">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+          <div class="info-body">
+            <p>The browser sends tracked detections to the local bridge. The bridge sends UDP OSC to the host and port in the OSC panel.</p>
+            <dl class="spec-list">
+              <dt>/troloyolo/frame</dt>
+              <dd>frameId, count, width, height, timestamp, source</dd>
+              <dt>/troloyolo/object</dt>
+              <dd>frameId, id, classId, label, type, score, nx, ny, nw, nh, ncx, ncy, x, y, w, h</dd>
+              <dt>/troloyolo/test</dt>
+              <dd>timestamp, host, port</dd>
+            </dl>
+            <p>Normalized values are 0..1. Pixel values are in the source camera or media coordinate space.</p>
+          </div>
+        </div>
+      </div>
     </main>
 
-    <script type="module" src="./main.js?v=20260427-detect-nms"></script>
+    <script type="module" src="./main.js?v=20260429-osc-panel"></script>
   </body>
 </html>
