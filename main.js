@@ -5,6 +5,7 @@ ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/di
 
 // DOM Elements
 const video = document.getElementById('video');
+const imageSource = document.getElementById('image-source');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const videoContainer = document.getElementById('video-container');
@@ -13,6 +14,12 @@ const btnIcon = document.getElementById('btn-icon');
 const btnText = document.getElementById('btn-text');
 const modelSelect = document.getElementById('model-select');
 const backendSelect = document.getElementById('backend-select');
+const sourceControl = document.getElementById('source-control');
+const sourceSelect = document.getElementById('source-select');
+const mediaFile = document.getElementById('media-file');
+const mediaUrl = document.getElementById('media-url');
+const mediaUrlRow = document.getElementById('media-url-row');
+const loadUrlBtn = document.getElementById('load-url-btn');
 const layerCamera = document.getElementById('layer-camera');
 const layerDetect = document.getElementById('layer-detect');
 const layerSegment = document.getElementById('layer-segment');
@@ -35,7 +42,7 @@ const models = {};
 let processor = null;
 let isRunning = false;
 let isProcessing = false;
-let threshold = 0.5;
+let threshold = 0.65;
 let layers = {
   camera: true,
   detect: true,
@@ -45,6 +52,10 @@ let layers = {
   classify: false
 };
 let backend = 'auto';
+let sourceMode = 'camera';
+let activeSourceType = 'camera';
+let mediaObjectUrl = null;
+let lastFrameErrorMessage = '';
 let facingMode = 'environment';
 let mirrorVideo = false;
 let activeDevice = null;
@@ -77,7 +88,7 @@ const SKELETON = [
   [5, 11], [6, 12], [11, 12],
   [11, 13], [13, 15], [12, 14], [14, 16]
 ];
-const POSE_THRESHOLD = 0.0001;
+const POSE_THRESHOLD = 0.25;
 const YOLO_INPUT_SIZE = 640;
 const YOLO_MASK_ALPHA = 0.36;
 const AXERA_SEGMENT_REPO = 'https://huggingface.co/AXERA-TECH/yolo26-seg/resolve/main';
@@ -135,6 +146,62 @@ const hasCameraSecurityContext = () => window.isSecureContext || ['localhost', '
 
 const getPixelRatio = () => Math.max(1, window.devicePixelRatio || 1);
 
+const getActiveMediaElement = () => activeSourceType === 'image' ? imageSource : video;
+
+const getActiveMediaSize = () => activeSourceType === 'image'
+  ? { width: imageSource.naturalWidth, height: imageSource.naturalHeight }
+  : { width: video.videoWidth, height: video.videoHeight };
+
+const isYoutubeUrl = (value) => {
+  try {
+    const { hostname } = new URL(value);
+    return /(^|\.)youtube\.com$/i.test(hostname) || /(^|\.)youtu\.be$/i.test(hostname);
+  } catch {
+    return false;
+  }
+};
+
+const isGifSource = (value = '') => /\.gif(?:[?#].*)?$/i.test(value);
+
+const revokeMediaObjectUrl = () => {
+  if (mediaObjectUrl) URL.revokeObjectURL(mediaObjectUrl);
+  mediaObjectUrl = null;
+};
+
+const setElementCrossOrigin = (element, url) => {
+  if (url.startsWith('blob:')) {
+    element.removeAttribute('crossorigin');
+    return;
+  }
+
+  element.crossOrigin = 'anonymous';
+};
+
+const setActiveMediaVisibility = () => {
+  const imageActive = activeSourceType === 'image';
+  video.classList.toggle('media-source', imageActive);
+  video.classList.toggle('active', !imageActive);
+  imageSource.classList.toggle('active', imageActive);
+  video.classList.toggle('hidden-layer', !layers.camera && !imageActive);
+  imageSource.classList.toggle('hidden-layer', !layers.camera && imageActive);
+  video.classList.toggle('mirrored', mirrorVideo && !imageActive);
+  imageSource.classList.toggle('mirrored', mirrorVideo && imageActive);
+};
+
+const getSourceLabel = () => ({
+  camera: 'Camera',
+  video: 'Video',
+  image: 'GIF'
+}[activeSourceType] || 'Source');
+
+const getFrameReadErrorMessage = (error) => {
+  if (error?.name === 'SecurityError') {
+    return 'This media source blocks canvas reads. Try a local file or a direct URL with CORS enabled.';
+  }
+
+  return error?.message || 'Could not process this media frame.';
+};
+
 const resizeCanvas = () => {
   const rect = canvas.getBoundingClientRect();
   const width = Math.round(rect.width * getPixelRatio());
@@ -147,11 +214,12 @@ const resizeCanvas = () => {
 };
 
 const prepareFrameCanvas = () => {
-  if (!video.videoWidth || !video.videoHeight) return false;
+  const { width, height } = getActiveMediaSize();
+  if (!width || !height) return false;
 
-  if (offscreen.width !== video.videoWidth || offscreen.height !== video.videoHeight) {
-    offscreen.width = video.videoWidth;
-    offscreen.height = video.videoHeight;
+  if (offscreen.width !== width || offscreen.height !== height) {
+    offscreen.width = width;
+    offscreen.height = height;
   }
 
   resizeCanvas();
@@ -159,8 +227,9 @@ const prepareFrameCanvas = () => {
 };
 
 const getVideoCoverTransform = () => {
-  const sourceWidth = offscreen.width || video.videoWidth || canvas.width;
-  const sourceHeight = offscreen.height || video.videoHeight || canvas.height;
+  const { width: mediaWidth, height: mediaHeight } = getActiveMediaSize();
+  const sourceWidth = offscreen.width || mediaWidth || canvas.width;
+  const sourceHeight = offscreen.height || mediaHeight || canvas.height;
   const scale = Math.max(canvas.width / sourceWidth, canvas.height / sourceHeight);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
@@ -223,12 +292,30 @@ const getLabel = (model, classId) => model?.config?.id2label?.[classId] || model
 
 const sigmoid = (value) => 1 / (1 + Math.exp(-value));
 
-const maybeNormalizeBox = ([x1, y1, x2, y2]) => {
-  if (Math.max(x1, y1, x2, y2) <= 1.5) {
-    return [x1 * offscreen.width, y1 * offscreen.height, (x2 - x1) * offscreen.width, (y2 - y1) * offscreen.height];
-  }
-  return [x1, y1, x2 - x1, y2 - y1];
+const scaleModelCoordinate = (value, axisSize) => {
+  if (Math.abs(value) <= 1.5) return value * axisSize;
+  return value * axisSize / YOLO_INPUT_SIZE;
 };
+
+const scaleModelLength = (value, axisSize) => {
+  if (Math.abs(value) <= 1.5) return value * axisSize;
+  return value * axisSize / YOLO_INPUT_SIZE;
+};
+
+const scaleModelBox = ([x1, y1, x2, y2]) => {
+  const left = scaleModelCoordinate(x1, offscreen.width);
+  const top = scaleModelCoordinate(y1, offscreen.height);
+  const right = scaleModelCoordinate(x2, offscreen.width);
+  const bottom = scaleModelCoordinate(y2, offscreen.height);
+  return [left, top, right - left, bottom - top];
+};
+
+const scaleModelCenterBox = ([cx, cy, w, h]) => [
+  scaleModelCoordinate(cx - w / 2, offscreen.width),
+  scaleModelCoordinate(cy - h / 2, offscreen.height),
+  scaleModelLength(w, offscreen.width),
+  scaleModelLength(h, offscreen.height)
+];
 
 const iou = (a, b) => {
   const x1 = Math.max(a[0], b[0]);
@@ -396,7 +483,7 @@ async function loadModels(modelId) {
     setStatus(`Ready (${activeLabel})`, 'ready');
     hideLoader();
     startBtn.disabled = false;
-    startCamera();
+    startSource();
   } catch (error) {
     console.error('Model loading failed:', error);
     setStatus('Error', 'error');
@@ -404,9 +491,51 @@ async function loadModels(modelId) {
   }
 }
 
-// Camera Control
+// Source Control
+const setRunningUi = (running) => {
+  isRunning = running;
+  btnIcon.innerHTML = running
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l15 8-15 8V4z"/></svg>';
+  btnText.textContent = running ? `Stop ${getSourceLabel()}` : `Start ${sourceMode === 'camera' ? 'Camera' : 'Source'}`;
+  startBtn.classList.toggle('running', running);
+  document.body.classList.toggle('camera-running', running);
+};
+
+function startProcessingLoop() {
+  prepareFrameCanvas();
+  lastFrameErrorMessage = '';
+  setRunningUi(true);
+  hideLoader();
+  setStatus('Running', 'running');
+  loop();
+}
+
+async function startSource() {
+  if (sourceMode === 'file') {
+    const file = mediaFile.files?.[0];
+    if (!file) {
+      mediaFile.click();
+      return;
+    }
+    await startFileSource(file);
+    return;
+  }
+
+  if (sourceMode === 'url') {
+    await startUrlSource(mediaUrl.value.trim());
+    return;
+  }
+
+  await startCamera();
+}
+
 async function startCamera() {
   try {
+    stopMediaElements();
+    activeSourceType = 'camera';
+    setActiveMediaVisibility();
+
     if (!hasCameraSecurityContext()) {
       throw new Error('Camera access requires HTTPS or localhost. Use Tailscale Serve and open the https://*.ts.net URL.');
     }
@@ -423,17 +552,7 @@ async function startCamera() {
 
     video.srcObject = stream;
     video.onloadedmetadata = () => {
-      prepareFrameCanvas();
-
-      isRunning = true;
-      btnIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
-      btnText.textContent = 'Stop Camera';
-      startBtn.classList.add('running');
-      document.body.classList.add('camera-running');
-
-      hideLoader();
-      setStatus('Running', 'running');
-      loop();
+      startProcessingLoop();
     };
   } catch (error) {
     console.error('Camera error:', error);
@@ -442,22 +561,82 @@ async function startCamera() {
   }
 }
 
-function stopCamera(keepProcessingFlag = false) {
-  if (animationId) cancelAnimationFrame(animationId);
-  animationId = null;
+async function startFileSource(file) {
+  stopMediaElements();
+  const url = URL.createObjectURL(file);
+  mediaObjectUrl = url;
+  const isGif = file.type === 'image/gif' || isGifSource(file.name);
+  await startMediaUrl(url, isGif ? 'image' : 'video', file.name);
+}
 
+async function startUrlSource(url) {
+  if (!url) {
+    throw new Error('Enter a direct media URL first.');
+  }
+
+  if (isYoutubeUrl(url)) {
+    throw new Error('YouTube links cannot be used directly in this static browser demo because the frames are cross-origin and not available to canvas. Use a downloaded video file or a direct MP4/WebM/GIF URL.');
+  }
+
+  stopMediaElements();
+  await startMediaUrl(url, isGifSource(url) ? 'image' : 'video', url);
+}
+
+async function startMediaUrl(url, type, label) {
+  showLoader(`Loading ${type === 'image' ? 'GIF' : 'video'}...`);
+  activeSourceType = type;
+  setActiveMediaVisibility();
+
+  if (type === 'image') {
+    await new Promise((resolve, reject) => {
+      imageSource.onload = resolve;
+      imageSource.onerror = () => reject(new Error(`Could not load GIF source: ${label}`));
+      setElementCrossOrigin(imageSource, url);
+      imageSource.src = url;
+    });
+    startProcessingLoop();
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    video.onloadedmetadata = resolve;
+    video.onerror = () => reject(new Error(`Could not load video source: ${label}`));
+    video.srcObject = null;
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    setElementCrossOrigin(video, url);
+    video.src = url;
+    video.play().catch(reject);
+  });
+
+  startProcessingLoop();
+}
+
+function stopMediaElements() {
   if (video.srcObject) {
     video.srcObject.getTracks().forEach(t => t.stop());
     video.srcObject = null;
   }
 
-  isRunning = false;
+  video.pause();
+  video.removeAttribute('src');
+  video.removeAttribute('crossorigin');
+  video.load();
+  imageSource.removeAttribute('src');
+  imageSource.removeAttribute('crossorigin');
+  revokeMediaObjectUrl();
+}
+
+function stopCamera(keepProcessingFlag = false) {
+  if (animationId) cancelAnimationFrame(animationId);
+  animationId = null;
+
+  stopMediaElements();
+
   if (!keepProcessingFlag) isProcessing = false;
 
-  btnIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l15 8-15 8V4z"/></svg>';
-  btnText.textContent = 'Start Camera';
-  startBtn.classList.remove('running');
-  document.body.classList.remove('camera-running');
+  setRunningUi(false);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const statusLabel = activeDevice ? `Ready (${DEVICE_CONFIG[activeDevice].label})` : 'Ready';
   setStatus(statusLabel, 'ready');
@@ -473,6 +652,17 @@ function loop() {
     const startTime = performance.now();
     detect()
       .then(() => fpsEl.textContent = Math.round(1000 / (performance.now() - startTime)))
+      .catch((error) => {
+        const message = getFrameReadErrorMessage(error);
+        console.error('Frame processing error:', error);
+        fpsEl.textContent = '0';
+
+        if (message !== lastFrameErrorMessage) {
+          lastFrameErrorMessage = message;
+          setStatus('Frame Error', 'error');
+          showLoader(message);
+        }
+      })
       .finally(() => isProcessing = false);
   } else if (!hasRunnableLayer()) {
     resizeCanvas();
@@ -485,7 +675,7 @@ function loop() {
 async function detect() {
   if (!prepareFrameCanvas()) return;
 
-  offscreenCtx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+  offscreenCtx.drawImage(getActiveMediaElement(), 0, 0, offscreen.width, offscreen.height);
   const detections = [];
   const activeLayerKeys = getEnabledModelLayerKeys().filter(key => models[key]);
   const transformerLayerKeys = activeLayerKeys.filter(key => MODEL_LAYERS[key].runtime === 'transformers');
@@ -543,10 +733,10 @@ function prepareYoloInput() {
 }
 
 function parseDetectionOutput(output, model) {
-  const detections = [];
+  const candidates = [];
   const scores = output.logits?.sigmoid?.().data;
   const boxes = output.pred_boxes?.data;
-  if (!scores || !boxes) return detections;
+  if (!scores || !boxes) return [];
 
   const numBoxes = Math.min(300, boxes.length / 4);
   const numClasses = scores.length / numBoxes;
@@ -559,9 +749,11 @@ function parseDetectionOutput(output, model) {
     }
     if (maxScore >= threshold) {
       const [cx, cy, w, h] = [boxes[i * 4], boxes[i * 4 + 1], boxes[i * 4 + 2], boxes[i * 4 + 3]];
-      detections.push({
+      const box = scaleModelCenterBox([cx, cy, w, h]);
+      candidates.push({
         type: 'object',
-        box: [(cx - w / 2) * offscreen.width, (cy - h / 2) * offscreen.height, w * offscreen.width, h * offscreen.height],
+        box,
+        xyxy: [box[0], box[1], box[0] + box[2], box[1] + box[3]],
         score: maxScore,
         classId: maxClass,
         label: getLabel(model, maxClass)
@@ -569,7 +761,7 @@ function parseDetectionOutput(output, model) {
     }
   }
 
-  return detections;
+  return nms(candidates, 0.45, 12);
 }
 
 function parsePoseOutput(output) {
@@ -588,12 +780,15 @@ function parsePoseOutput(output) {
       const keypoints = [];
       for (let k = 0; k < 17; k++) {
         const kIdx = offset + 6 + k * 3;
-        keypoints.push({ x: data[kIdx] * offscreen.width, y: data[kIdx + 1] * offscreen.height, c: data[kIdx + 2] });
+        keypoints.push({
+          x: scaleModelCoordinate(data[kIdx], offscreen.width),
+          y: scaleModelCoordinate(data[kIdx + 1], offscreen.height),
+          c: data[kIdx + 2]
+        });
       }
       detections.push({
         type: 'pose',
-        box: [data[offset] * offscreen.width, data[offset + 1] * offscreen.height,
-              (data[offset + 2] - data[offset]) * offscreen.width, (data[offset + 3] - data[offset + 1]) * offscreen.height],
+        box: scaleModelBox([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]),
         score,
         keypoints
       });
@@ -740,10 +935,10 @@ function parseObbOutput(output, model) {
     const classId = Math.max(0, Math.round(data[offset + 5]));
     detections.push({
       type: 'obb',
-      cx: data[offset] * offscreen.width,
-      cy: data[offset + 1] * offscreen.height,
-      w: data[offset + 2] * offscreen.width,
-      h: data[offset + 3] * offscreen.height,
+      cx: scaleModelCoordinate(data[offset], offscreen.width),
+      cy: scaleModelCoordinate(data[offset + 1], offscreen.height),
+      w: scaleModelLength(data[offset + 2], offscreen.width),
+      h: scaleModelLength(data[offset + 3], offscreen.height),
       angle: data[offset + 6],
       score,
       classId,
@@ -915,7 +1110,20 @@ function drawSegmentationMask(mask, color, transform) {
 }
 
 // Event Listeners
-startBtn.addEventListener('click', () => isRunning ? stopCamera() : startCamera());
+const reportSourceError = (error) => {
+  console.error('Source error:', error);
+  setRunningUi(false);
+  setStatus('Source Error', 'error');
+  showLoader(error.message || 'Could not load source');
+};
+
+startBtn.addEventListener('click', () => {
+  if (isRunning) {
+    stopCamera();
+    return;
+  }
+  startSource().catch(reportSourceError);
+});
 uiToggle.addEventListener('click', () => setUiCollapsed(!isUiCollapsed));
 videoContainer.addEventListener('click', () => {
   if (isUiCollapsed) {
@@ -937,7 +1145,37 @@ thresholdInput.addEventListener('input', (e) => {
 });
 layerCamera.addEventListener('change', (e) => {
   layers.camera = e.target.checked;
-  video.classList.toggle('hidden-layer', !layers.camera);
+  setActiveMediaVisibility();
+});
+
+sourceSelect.addEventListener('change', (e) => {
+  sourceMode = e.target.value;
+  if (isRunning) stopCamera();
+  mediaFile.hidden = sourceMode !== 'file';
+  mediaUrlRow.hidden = sourceMode !== 'url';
+  toggleFacing.closest('.toggle').hidden = sourceMode !== 'camera';
+  sourceControl.title = sourceMode === 'url'
+    ? 'Use a direct MP4/WebM/GIF URL. YouTube pages cannot be read as canvas frames.'
+    : 'Use a camera stream, local movie/GIF, or direct MP4/WebM/GIF URL.';
+  setRunningUi(false);
+});
+
+mediaFile.addEventListener('change', () => {
+  if (sourceMode === 'file' && mediaFile.files?.[0] && !isRunning) {
+    startSource().catch(reportSourceError);
+  }
+});
+
+loadUrlBtn.addEventListener('click', () => {
+  if (isRunning) stopCamera();
+  startSource().catch(reportSourceError);
+});
+
+mediaUrl.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    loadUrlBtn.click();
+  }
 });
 
 const bindModelLayerToggle = (input, key) => {
@@ -955,14 +1193,14 @@ bindModelLayerToggle(layerClassify, 'classify');
 
 toggleFacing.addEventListener('change', async (e) => {
   facingMode = e.target.checked ? 'user' : 'environment';
-  if (isRunning) {
+  if (isRunning && sourceMode === 'camera') {
     stopCamera(true);
     await startCamera();
   }
 });
 toggleMirror.addEventListener('change', (e) => {
   mirrorVideo = e.target.checked;
-  video.classList.toggle('mirrored', mirrorVideo);
+  setActiveMediaVisibility();
 });
 modelSelect.addEventListener('change', (e) => loadModels(e.target.value));
 backendSelect.addEventListener('change', (e) => {
@@ -971,4 +1209,5 @@ backendSelect.addEventListener('change', (e) => {
 });
 
 // Initialize
+setActiveMediaVisibility();
 loadModels(modelSelect.value);

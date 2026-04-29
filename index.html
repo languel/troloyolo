@@ -25,6 +25,7 @@
         <div class="video-section">
           <div class="video-container" id="video-container">
             <video id="video" autoplay playsinline muted></video>
+            <img id="image-source" class="media-source" alt="" />
             <canvas id="canvas"></canvas>
 
             <!-- Overlay UI -->
@@ -80,6 +81,20 @@
               </select>
             </div>
 
+            <div class="control-group source-control" id="source-control" title="Use a camera stream, local movie/GIF, or direct MP4/WebM/GIF URL.">
+              <label for="source-select">Source</label>
+              <select id="source-select">
+                <option value="camera">Camera</option>
+                <option value="file">Movie / GIF file</option>
+                <option value="url">Direct media URL</option>
+              </select>
+              <input id="media-file" class="source-input" type="file" accept="video/*,image/gif" hidden />
+              <div id="media-url-row" class="source-row" hidden>
+                <input id="media-url" class="source-input" type="url" placeholder="https://media.giphy.com/media/Ju7l5y9osyymQ/giphy.gif" value="https://media.giphy.com/media/Ju7l5y9osyymQ/giphy.gif" title="Use a direct MP4/WebM/GIF URL. YouTube pages cannot be read as canvas frames." />
+                <button id="load-url-btn" class="btn-secondary" type="button">Load</button>
+              </div>
+            </div>
+
             <!-- Layers -->
             <div class="control-group">
               <label>Layers</label>
@@ -133,14 +148,14 @@
 
             <!-- Threshold -->
             <div class="control-group threshold-control">
-              <label for="threshold">Confidence: <span id="threshold-value">50%</span></label>
-              <input type="range" id="threshold" min="0" max="100" value="50" />
+              <label for="threshold">Confidence: <span id="threshold-value">65%</span></label>
+              <input type="range" id="threshold" min="0" max="100" value="65" />
             </div>
 
             <!-- Start Button -->
             <button id="start-btn" class="btn-primary" disabled>
               <span id="btn-icon">▶</span>
-              <span id="btn-text">Start Camera</span>
+              <span id="btn-text">Start Source</span>
             </button>
 
             <footer class="footer">
@@ -151,6 +166,6 @@
       </aside>
     </main>
 
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="./main.js?v=20260427-detect-nms"></script>
   </body>
 </html>
